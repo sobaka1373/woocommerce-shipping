@@ -14,11 +14,11 @@
  */
 
 if ( ! defined( 'WPINC' ) ) {
-
     die;
-
 }
 
+use Shuchkin\SimpleXLSX;
+require_once "simplexlsx-master/src/SimpleXLSX.php";
 /*
  * Check if WooCommerce is active
  */
@@ -37,18 +37,6 @@ if ( in_array( 'woocommerce/woocommerce.php', apply_filters( 'active_plugins', g
                     $this->id                 = 'tutsplus';
                     $this->method_title       = __( 'TutsPlus Shipping', 'tutsplus' );
                     $this->method_description = __( 'Custom Shipping Method for TutsPlus', 'tutsplus' );
-
-                    // Availability & Countries
-                    $this->availability = 'including';
-                    $this->countries = array(
-                        'US', // Unites States of America
-                        'CA', // Canada
-                        'DE', // Germany
-                        'GB', // United Kingdom
-                        'IT',   // Italy
-                        'ES', // Spain
-                        'HR'  // Croatia
-                    );
 
                     $this->init();
 
@@ -93,12 +81,26 @@ if ( in_array( 'woocommerce/woocommerce.php', apply_filters( 'active_plugins', g
                             'default' => __( 'TutsPlus Shipping', 'tutsplus' )
                         ),
 
-                        'weight' => array(
-                            'title' => __( 'Weight (kg)', 'tutsplus' ),
-                            'type' => 'number',
-                            'description' => __( 'Maximum allowed weight', 'tutsplus' ),
-                            'default' => 100
-                        ),
+
+//                        'file' => array(
+//                            'title' => __( 'File', 'tutsplus' ),
+//                            'type' => 'file',
+//                            'description' => __( 'File price', 'tutsplus' ),
+//                            'default' => 'no'
+//                        )
+
+                        'source' => array(
+                            'title' => __( 'File', 'tutsplus' ),
+                            'type' => 'text',
+                            'description' => __( 'File price', 'tutsplus' ),
+                        )
+
+//                        'weight' => array(
+//                            'title' => __( 'Weight (kg)', 'tutsplus' ),
+//                            'type' => 'number',
+//                            'description' => __( 'Maximum allowed weight', 'tutsplus' ),
+//                            'default' => 100
+//                        ),
 
                     );
 
@@ -112,71 +114,29 @@ if ( in_array( 'woocommerce/woocommerce.php', apply_filters( 'active_plugins', g
                  * @return void
                  */
                 public function calculate_shipping( $package ) {
+//                    $addressFrom = 'Ahornallee 4, 14050 Berlin, Германия';
+//                    $addressTo   = 'Naumannstraße 36, 10829 Berlin, Германия';
 
-                    $weight = 0;
-                    $cost = 0;
-                    $country = $package["destination"]["country"];
+                    $matrix = processFile(13);
 
-                    foreach ( $package['contents'] as $item_id => $values )
-                    {
-                        $_product = $values['data'];
-                        $weight = $weight + $_product->get_weight() * $values['quantity'];
+                    $product_count = 0;
+                    $store_address     = get_option( 'woocommerce_store_address' );
+                    $store_city        = get_option( 'woocommerce_store_city' );
+                    $store_postcode    = get_option( 'woocommerce_store_postcode' );
+                    $store_address_full = $store_address . " " . $store_postcode . " " . $store_city;
+                    $user_address = $package['destination']['address'] ." ". $package['destination']['postcode'] ." ".
+                        $package['destination']['city'] ." ". $package['destination']['country'];
+                    foreach ($package['contents'] as $product) {
+                        $product_count = $product_count + $product['quantity'];
                     }
 
-                    $weight = wc_get_weight( $weight, 'kg' );
-
-                    if( $weight <= 10 ) {
-
-                        $cost = 0;
-
-                    } elseif( $weight <= 30 ) {
-
-                        $cost = 5;
-
-                    } elseif( $weight <= 50 ) {
-
-                        $cost = 10;
-
-                    } else {
-
-                        $cost = 20;
-
+                    $distance = getDistance($store_address_full, $user_address);
+                    if (!$distance) {
+                        return;
                     }
+                    $distance = (int)str_replace('km', '', $distance);
 
-                    $countryZones = array(
-                        'HR' => 0,
-                        'US' => 3,
-                        'GB' => 2,
-                        'CA' => 3,
-                        'ES' => 2,
-                        'DE' => 1,
-                        'IT' => 1
-                    );
-
-                    $zonePrices = array(
-                        0 => 10,
-                        1 => 30,
-                        2 => 50,
-                        3 => 70
-                    );
-
-                    $zoneFromCountry = $countryZones[ $country ];
-                    $priceFromZone = $zonePrices[ $zoneFromCountry ];
-
-                    $cost += $priceFromZone;
-
-
-//////////////////////////////////////////////////////
-
-                    $addressFrom = 'Ahornallee 4, 14050 Berlin, Германия';
-                    $addressTo   = 'Naumannstraße 36, 10829 Berlin, Германия';
-
-
-                    $distance = getDistance($addressFrom, $addressTo);
-
-//                    $test = file_get_contents("https://maps.googleapis.com/maps/api/geocode/json?address=14050&key=AIzaSyBVzTVCNStKmPn47mh-e9xxmT2PamV0ebc");
-//////////////////////////////////////////////////////
-
+                    $cost = findCurrentCoast($distance, $matrix, $product_count);
 
                     $rate = array(
                         'id' => $this->id,
@@ -185,10 +145,46 @@ if ( in_array( 'woocommerce/woocommerce.php', apply_filters( 'active_plugins', g
                     );
 
                     $this->add_rate( $rate );
-
                 }
             }
         }
+    }
+
+    function processFile($file_id) {
+        $file = get_attached_file($file_id);
+        if ( $xlsx = SimpleXLSX::parseFile($file) ) {
+            $dim = $xlsx->dimension();
+            $num_cols = $dim[0];
+            $num_rows = $dim[1];
+
+            foreach ($xlsx->rows() as $index => $r) {
+                for ($i = 0; $i < $num_cols; $i ++) {
+                    if( !empty($r[ $i ])) {
+                        $matrix[$index][$i] = $r[ $i ];
+                    };
+                }
+            }
+        } else {
+            echo SimpleXLSX::parseError();
+        }
+        return $matrix;
+    }
+
+    function findCurrentCoast($distance, $matrix, $product_count) {
+        foreach ($matrix as $index => $row) {
+            if (intval($row[0]) && $distance < $row[0]) {
+                return $row;
+            } elseif(intval($row[0])) {
+                $current_row = $row;
+            }
+        }
+
+        if ($product_count < count($current_row)) {
+            return $current_row[$product_count];
+        } else {
+            return end($current_row);
+        }
+
     }
 
     function getDistance($addressFrom, $addressTo){
@@ -214,6 +210,8 @@ if ( in_array( 'woocommerce/woocommerce.php', apply_filters( 'active_plugins', g
         $result = file_get_contents('https://maps.googleapis.com/maps/api/distancematrix/json?origins=place_id:'. $outputFrom->results[0]->place_id .'&destinations=place_id:'.$outputTo->results[0]->place_id.'&mode=driving&key='.$apiKey);
         $result = json_decode($result);
         return $result->rows[0]->elements[0]->distance->text; //value
+
+        //                    $test = file_get_contents("https://maps.googleapis.com/maps/api/geocode/json?address=14050&key=AIzaSyBVzTVCNStKmPn47mh-e9xxmT2PamV0ebc");
     }
 
     add_action( 'woocommerce_shipping_init', 'tutsplus_shipping_method' );
@@ -225,50 +223,8 @@ if ( in_array( 'woocommerce/woocommerce.php', apply_filters( 'active_plugins', g
 
     add_filter( 'woocommerce_shipping_methods', 'add_tutsplus_shipping_method' );
 
-    function tutsplus_validate_order( $posted )   {
 
-        $packages = WC()->shipping->get_packages();
 
-        $chosen_methods = WC()->session->get( 'chosen_shipping_methods' );
-
-        if( is_array( $chosen_methods ) && in_array( 'tutsplus', $chosen_methods ) ) {
-
-            foreach ( $packages as $i => $package ) {
-
-                if ( $chosen_methods[ $i ] != "tutsplus" ) {
-
-                    continue;
-
-                }
-
-                $TutsPlus_Shipping_Method = new TutsPlus_Shipping_Method();
-                $weightLimit = (int) $TutsPlus_Shipping_Method->settings['weight'];
-                $weight = 0;
-
-                foreach ( $package['contents'] as $item_id => $values )
-                {
-                    $_product = $values['data'];
-                    $weight = $weight + $_product->get_weight() * $values['quantity'];
-                }
-
-                $weight = wc_get_weight( $weight, 'kg' );
-
-                if( $weight > $weightLimit ) {
-
-                    $message = sprintf( __( 'Sorry, %d kg exceeds the maximum weight of %d kg for %s', 'tutsplus' ), $weight, $weightLimit, $TutsPlus_Shipping_Method->title );
-
-                    $messageType = "error";
-
-                    if( ! wc_has_notice( $message, $messageType ) ) {
-
-                        wc_add_notice( $message, $messageType );
-
-                    }
-                }
-            }
-        }
-    }
-
-    add_action( 'woocommerce_review_order_before_cart_contents', 'tutsplus_validate_order' , 10 );
+//    add_action( 'woocommerce_review_order_before_cart_contents', 'tutsplus_validate_order' , 10 );
     add_action( 'woocommerce_after_checkout_validation', 'tutsplus_validate_order' , 10 );
 }
