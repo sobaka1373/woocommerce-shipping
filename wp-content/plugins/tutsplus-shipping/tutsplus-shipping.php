@@ -117,7 +117,16 @@ if ( in_array( 'woocommerce/woocommerce.php', apply_filters( 'active_plugins', g
 //                    $addressFrom = 'Ahornallee 4, 14050 Berlin, Германия';
 //                    $addressTo   = 'Naumannstraße 36, 10829 Berlin, Германия';
 
-                    $matrix = processFile(13);
+                    $TutsPlus_Shipping_Method = new TutsPlus_Shipping_Method();
+                    $source = (string) $TutsPlus_Shipping_Method->settings['source'];
+                    if ($source === '') {
+                        return;
+                    }
+                    $file_id = attachment_url_to_postid($source);
+                    if (!$file_id) {
+                        return;
+                    }
+                    $matrix = processFile($file_id);
 
                     $product_count = 0;
                     $store_address     = get_option( 'woocommerce_store_address' );
@@ -173,7 +182,8 @@ if ( in_array( 'woocommerce/woocommerce.php', apply_filters( 'active_plugins', g
     function findCurrentCoast($distance, $matrix, $product_count) {
         foreach ($matrix as $index => $row) {
             if (intval($row[0]) && $distance < $row[0]) {
-                return $row;
+                $current_row = $row;
+                break;
             } elseif(intval($row[0])) {
                 $current_row = $row;
             }
@@ -189,7 +199,9 @@ if ( in_array( 'woocommerce/woocommerce.php', apply_filters( 'active_plugins', g
 
     function getDistance($addressFrom, $addressTo){
         // Google API key
-        $apiKey = 'AIzaSyBVzTVCNStKmPn47mh-e9xxmT2PamV0ebc';
+        $apiKey = 'AIzaSyBVzTVCNStKmPn47mh-e9xxmT2PamV0ebc'; // MY key
+
+//        $apiKey = 'AIzaSyB1iXrYerWvtX-DX1hQgy4g-WJHK6eAfFo';
 
         // Change address format
         $formattedAddrFrom    = str_replace(' ', '+', $addressFrom);
@@ -221,10 +233,11 @@ if ( in_array( 'woocommerce/woocommerce.php', apply_filters( 'active_plugins', g
         return $methods;
     }
 
+    function test ($button_text = '') {
+
+    }
+
     add_filter( 'woocommerce_shipping_methods', 'add_tutsplus_shipping_method' );
-
-
-
-//    add_action( 'woocommerce_review_order_before_cart_contents', 'tutsplus_validate_order' , 10 );
     add_action( 'woocommerce_after_checkout_validation', 'tutsplus_validate_order' , 10 );
+    add_action('woocommerce_before_cart_totals', 'test');
 }
